@@ -1,0 +1,67 @@
+# depslib dependency file v1.0
+1484751873 source:/home/szymon/Pobrane/sk2-projekt/main.cpp
+	<iostream>
+	<cstdlib>
+	<cstdio>
+	<unistd.h>
+	<sys/socket.h>
+	<netinet/in.h>
+	<arpa/inet.h>
+	<errno.h>
+	<error.h>
+	<netdb.h>
+	<sys/epoll.h>
+	<poll.h>
+	<signal.h>
+	<fcntl.h>
+	<thread>
+	<vector>
+	<chrono>
+	<string>
+	<unordered_set>
+	<algorithm>
+	<stk/Stk.h>
+	<json.h>
+
+1421079833 /usr/include/json-c/json.h
+	"bits.h"
+	"debug.h"
+	"linkhash.h"
+	"arraylist.h"
+	"json_util.h"
+	"json_object.h"
+	"json_tokener.h"
+	"json_object_iterator.h"
+	"json_c_version.h"
+
+1421079833 /usr/include/json-c/bits.h
+
+1421079833 /usr/include/json-c/debug.h
+	<stdlib.h>
+
+1421079833 /usr/include/json-c/linkhash.h
+	"json_object.h"
+
+1421079833 /usr/include/json-c/json_object.h
+	"json_inttypes.h"
+
+1421079833 /usr/include/json-c/json_inttypes.h
+	"json_config.h"
+	<inttypes.h>
+
+1421079833 /usr/include/json-c/json_config.h
+
+1421079833 /usr/include/json-c/arraylist.h
+
+1421079833 /usr/include/json-c/json_util.h
+	"json_object.h"
+
+1421079833 /usr/include/json-c/json_tokener.h
+	<stddef.h>
+	"json_object.h"
+
+1421079811 /usr/include/json-c/json_object_iterator.h
+	<stddef.h>
+
+1421079833 /usr/include/json-c/json_c_version.h
+
