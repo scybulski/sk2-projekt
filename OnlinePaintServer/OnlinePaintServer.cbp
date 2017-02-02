@@ -36,9 +36,10 @@
 		<Compiler>
 			<Add option="-Wall" />
 			<Add option="-std=c++11" />
-			<Add option="-fexceptions" />
+			<Add option="-fexceptions `pkg-config json-c --cflags`" />
 		</Compiler>
 		<Linker>
+			<Add option="`pkg-config json-c --libs`" />
 			<Add library="pthread" />
 		</Linker>
 		<Unit filename="main.cpp" />

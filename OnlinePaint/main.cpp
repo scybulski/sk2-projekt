@@ -6,6 +6,7 @@
 #include <string.h>
 #include <json.h>
 #include <thread>
+#include <fcntl.h>
 
 #define CANVAS_WIDTH 600
 #define CANVAS_HEIGHT 600
@@ -38,6 +39,9 @@ typedef enum
   TEXT
 } figures;
 
+struct timeval timeout;
+struct timeval timeoutZero;
+
 int currentItemState = 0;
 gdouble currentItemX, currentItemY, currentItemRotation, currentItemScale;
 char *currentItemColor, *currentItemText, *currentItemFigure;
@@ -53,9 +57,10 @@ constexpr unsigned int str2int(const char* str, int h = 0)
 }
 
 void establishConnection(char* address, char* port) {
-    struct timeval timeout;
     timeout.tv_sec = 10;
     timeout.tv_usec = 0;
+    timeoutZero.tv_sec = 0;
+    timeoutZero.tv_usec = 0;
 
 	// Resolve arguments to IPv4 address with a port number
 	addrinfo *resolved, hints={.ai_flags=0, .ai_family=AF_INET, .ai_socktype=SOCK_STREAM};
@@ -84,16 +89,29 @@ void establishConnection(char* address, char* port) {
 }
 
 void continousUpdate() {
-	ssize_t bufsize1 = BUFFER_SIZE, received1;
+	ssize_t bufsize1 = BUFFER_SIZE, received1, receivedTotal;
 	gdouble x, y, rotation, scale;
 	const char *figure, *color, *text;
-	char buffer1[bufsize1];
+	char *buffer1, *temp;
 	while(!quit) {
         printf("Continous update\n");
-        received1 = read(sock, buffer1, bufsize1);
+        receivedTotal = 0;
+        temp = (char*) malloc(bufsize1 * sizeof(char));
+        buffer1 = (char*) malloc(bufsize1 * sizeof(char));
+        fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) & ~O_NONBLOCK);
+        received1 = read(sock, temp, bufsize1);
         if(received1 > 0) {
+            buffer1 = strncpy(buffer1, temp, received1);
+            fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
+            while(received1 > 0) {
+                printf("kkkkkkkkkkkkkkkkk\n");
+                buffer1 = (char*) realloc(buffer1, (receivedTotal + received1 + 1) * sizeof(char));
+                memcpy(buffer1 + receivedTotal, temp, received1);
+                receivedTotal += received1;
+                received1 = read(sock, (char*) temp, bufsize1);
+            }
             try {
-                printf("Received %s\n", buffer1);
+                printf("RECEIVED\n%s\n", buffer1);
                 char *pch = strtok (buffer1,"\n");
                 while(pch != NULL) {
                     printf("PARSING %s\n", pch);

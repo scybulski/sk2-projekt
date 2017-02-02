@@ -11,6 +11,7 @@
 				<Option object_output="obj/Debug/" />
 				<Option type="1" />
 				<Option compiler="gcc" />
+				<Option parameters="localhost 10101" />
 				<Compiler>
 					<Add option="-g" />
 				</Compiler>
@@ -31,16 +32,15 @@
 		<Compiler>
 			<Add option="-Wall" />
 			<Add option="-std=c++11" />
-			<Add option="`pkg-config gtk+-3.0 goocanvas-2.0 goocanvasmm-2.0 --cflags`" />
+			<Add option="`pkg-config gtk+-3.0 goocanvas-2.0 goocanvasmm-2.0 json-c pthread-stubs json-c --cflags`" />
 			<Add directory="/usr/include/goocanvas-2.0" />
 		</Compiler>
 		<Linker>
-			<Add option="`pkg-config gtk+-3.0 goocanvas-2.0 goocanvasmm-2.0 --libs`" />
+			<Add option="`pkg-config gtk+-3.0 goocanvas-2.0 goocanvasmm-2.0 pthread-stubs json-c --libs`" />
+			<Add library="pthread" />
 			<Add directory="/usr/include/goocanvas-2.0" />
 		</Linker>
-		<Unit filename="main.c">
-			<Option compilerVar="CC" />
-		</Unit>
+		<Unit filename="main.cpp" />
 		<Extensions>
 			<code_completion />
 			<debugger />
