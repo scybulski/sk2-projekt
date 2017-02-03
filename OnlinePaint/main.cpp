@@ -357,12 +357,15 @@ static void drawItem(char* figure, char* text, gdouble scale, gdouble rotation, 
                 NULL);
             break;
         case str2int("circle") :
+            printf("circle %s \n", currentItemColor);
+
             currentItem = goo_canvas_ellipse_new(root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
                 "line-width", 0.0,
                 "center-x", 0.0,
                 "center-y", 0.0,
                 "fill-color", currentItemColor,
                 NULL);
+            break;
         case str2int("text") :
             currentItem = goo_canvas_text_new (root, text, 0, 0, -1,
                 GOO_CANVAS_ANCHOR_CENTER,
@@ -463,9 +466,9 @@ gboolean buttonReleaseCallback(
                 lastKnownY = event->y;
                 currentItemX = event->x;
                 currentItemY = event->y;
-//                if(!strcmp(currentItemFigure, "circle"))
-//                    currentItemState = ITEM_STATE_SCALE;
-//                else
+                if(!strcmp(currentItemFigure, "circle"))
+                    currentItemState = ITEM_STATE_SCALE;
+                else
                     currentItemState = ITEM_STATE_ROTATE;
             }
             break;
