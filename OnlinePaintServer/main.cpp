@@ -238,15 +238,13 @@ void receiveMessage(int clientFd) {
                 std::string str(buf);
 
                 switch(str2int(figure)) {
-                    case str2int("square") :
+                    case str2int("square") : case str2int("circle") : case str2int("text") :
                         items[id] = str;
                         nextId++;
-//                        sendToAllBut(clientFd, buffer, count);
                         sendToAll(buf, strlen(buf));
                         break;
                     case str2int("delete") :
                         items.erase(id);
-//                        sendToAllBut(clientFd, buffer, count);
                         sendToAll(buf, strlen(buf));
                         break;
                     default :
