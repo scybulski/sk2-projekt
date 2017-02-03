@@ -17,10 +17,12 @@
 #include <chrono>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
 #include <stk/Stk.h>
 #include <json.h>
 
+#define DEFAULT_PORT 10101
 #define DELAY_MS 1000
 #define RATE 44100.
 #define BUF_SIZE 1024
@@ -37,7 +39,8 @@ int servFd;
 // client sockets
 std::unordered_set<int> clientFds;
 std::vector<std::thread> r;
-std::unordered_set<std::string> items;
+std::unordered_map<int, std::string> items;
+int nextId = 0;
 
 // handles SIGINT
 void ctrl_c(int);
@@ -66,8 +69,15 @@ constexpr unsigned int str2int(const char* str, int h = 0) {
 int main(int argc, char ** argv){
 //    printf("libsoxr version %s\n", soxr_version());
     //printf("%f\n", stk::PI);
-	if(argc != 2) error(1, 0, "Need 1 arg (port)");
-	auto port = readPort(argv[1]);
+    unsigned short port;
+	if(argc != 2) {
+        printf("arg1: port\nSetting default port %d\n", DEFAULT_PORT);
+        port = DEFAULT_PORT;
+    }
+    else {
+        port = readPort(argv[1]);
+        printf("Setting port %d\n", port);
+    }
 
 	// create socket
 	servFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -142,6 +152,20 @@ void ctrl_c(int){
 	exit(0);
 }
 
+void sendToAll(const char * buffer, int count){
+	int res;
+	decltype(clientFds) bad;
+	for(int clientFd : clientFds){
+		res = write(clientFd, buffer, count);
+		if(res!=count)
+			bad.insert(clientFd);
+	}
+	for(int clientFd : bad){
+		printf("removing %d\n", clientFd);
+		disconnectClient(clientFd);
+	}
+}
+
 void sendToAllBut(int fd, char * buffer, int count){
 	int res;
 	decltype(clientFds) bad;
@@ -160,7 +184,9 @@ void sendToAllBut(int fd, char * buffer, int count){
 void receiveMessage(int clientFd) {
     printf("receiveMessage: clientFd: %d\n", clientFd);
     char buffer[BUF_SIZE];
-    const char *figure;
+    const char *figure, *buf;
+    json_object *jId;
+    int id;
     while(true) {
         for(int i = 0; i < BUF_SIZE; i++) {
             buffer[i] = 0;
@@ -172,47 +198,56 @@ void receiveMessage(int clientFd) {
             try {
                 printf("Received %s\n", buffer);
                 figure = "";
-                json_object * jobj = json_tokener_parse(buffer);
-                json_object_object_foreach(jobj, key, val) {
+                id = -1;
+                json_object * jObj = json_tokener_parse(buffer);
+                json_object_object_foreach(jObj, key, val) {
                     switch (str2int(key)) {
                         case str2int("figure"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                             figure = json_object_get_string(val);
                             break;
 /*                        case str2int("x"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                             x = json_object_get_double(val);
                             break;
                         case str2int("y"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                             y = json_object_get_double(val);
                             break;
                         case str2int("rotation"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                             rotation = json_object_get_double(val);
                             break;
                         case str2int("scale"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                             scale = json_object_get_double(val);
                             break;
                         case str2int("color") :
-                            //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                             color = json_object_get_string(val);
                             break;
                         case str2int("text"):
-                            //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                             text = json_object_get_string(val);
                             break;*/
+                        case str2int("id"):
+                            id = json_object_get_int(val);
+                            break;
                     }
                 }
-                printf("Figure: %s\n", figure);
-                std::string str(buffer);
+                printf("Figure: %s id: %d\n", figure, id);
+                if(id < 0) {
+                    id = nextId;
+                }
+                jId = json_object_new_int(id);
+                json_object_object_add(jObj,"id", jId);
+                buf = json_object_to_json_string(jObj);
+                std::string str(buf);
+
                 switch(str2int(figure)) {
                     case str2int("square") :
-                        //char newItem[BUF_SIZE];
-                        //strcpy(newItem, buffer);
-                        items.insert(str);
-                        sendToAllBut(clientFd, buffer, count);
+                        items[id] = str;
+                        nextId++;
+//                        sendToAllBut(clientFd, buffer, count);
+                        sendToAll(buf, strlen(buf));
+                        break;
+                    case str2int("delete") :
+                        items.erase(id);
+//                        sendToAllBut(clientFd, buffer, count);
+                        sendToAll(buf, strlen(buf));
                         break;
                     default :
                         printf("Nothing\n");
@@ -249,9 +284,9 @@ void disconnectClient(int clientFd) {
 
 
 void sendCurrentItems(int clientFd) {
-    for(std::string item : items) {
+    for(std::pair<int, std::string> i : items) {
         char buf[BUF_SIZE];
-        strcpy(buf, item.c_str());
+        strcpy(buf, i.second.c_str());
         strcat(buf, "\n");
 
         printf("sending %s\n", buf);
