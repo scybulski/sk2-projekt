@@ -25,15 +25,8 @@
 
 #define DEFAULT_PORT 10101
 #define DELAY_MS 1000
-#define RATE 44100.
-#define BUF_SIZE 1024
+#define BUFFER_SIZE 1024
 
-struct client {
-    int clientFd;
-    struct std::thread receive;
-    struct std::thread send;
-    bool end = false;
-};
 // server socket
 int servFd;
 
@@ -46,9 +39,6 @@ int nextId = 0;
 
 // handles SIGINT
 void ctrl_c(int);
-
-// sends data to clientFds excluding fd
-void sendToAllBut(int fd, char * buffer, int count);
 
 // converts cstring to port
 uint16_t readPort(char * txt);
@@ -152,26 +142,10 @@ void ctrl_c(int){
 }
 
 void sendToAll(const char * buffer, int count){
-	int res;
 	decltype(clientFds) bad;
 	for(int clientFd : clientFds){
-		res = write(clientFd, buffer, count);
-		if(res!=count)
-			bad.insert(clientFd);
-	}
-	for(int clientFd : bad){
-		printf("removing %d\n", clientFd);
-		disconnectClient(clientFd);
-	}
-}
-
-void sendToAllBut(int fd, char * buffer, int count){
-	int res;
-	decltype(clientFds) bad;
-	for(int clientFd : clientFds){
-		if(clientFd == fd) continue;
-		res = write(clientFd, buffer, count);
-		if(res!=count)
+		int res = write(clientFd, buffer, count);
+		if(res != count)
 			bad.insert(clientFd);
 	}
 	for(int clientFd : bad){
@@ -181,86 +155,111 @@ void sendToAllBut(int fd, char * buffer, int count){
 }
 
 void receiveMessage(int clientFd) {
-    char buffer[BUF_SIZE];
+	ssize_t bufsize = BUFFER_SIZE;
     const char *figure, *buf;
     json_object *jId;
     int id;
     while(true) {
-        for(int i = 0; i < BUF_SIZE; i++) {
-            buffer[i] = 0;
-        }
-        int count = read(clientFd, buffer, BUF_SIZE);
-        if(count > 0) {
-            try {
-                printf("Received %s\n", buffer);
-                figure = "";
-                id = -1;
-                json_object * jObj = json_tokener_parse(buffer);
-                json_object_object_foreach(jObj, key, val) {
-                    switch (str2int(key)) {
-                        case str2int("figure"):
-                            figure = json_object_get_string(val);
-                            break;
-/*                        case str2int("x"):
-                            x = json_object_get_double(val);
-                            break;
-                        case str2int("y"):
-                            y = json_object_get_double(val);
-                            break;
-                        case str2int("rotation"):
-                            rotation = json_object_get_double(val);
-                            break;
-                        case str2int("scale"):
-                            scale = json_object_get_double(val);
-                            break;
-                        case str2int("color") :
-                            color = json_object_get_string(val);
-                            break;
-                        case str2int("text"):
-                            text = json_object_get_string(val);
-                            break;*/
-                        case str2int("id"):
-                            id = json_object_get_int(val);
-                            break;
-                    }
+        ssize_t received, receivedTotal;
+        char *buffer, *temp;
+        receivedTotal = 0;
+        temp = (char*) malloc(bufsize * sizeof(char));
+        buffer = (char*) malloc(bufsize * sizeof(char));
+        fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) & ~O_NONBLOCK);
+        received = read(clientFd, temp, bufsize);
+        if(received > 0) {
+            buffer = strncpy(buffer, temp, received);
+            fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) | O_NONBLOCK);
+            while(received > 0) {
+                buffer = (char*) realloc(buffer, (receivedTotal + received + 1) * sizeof(char));
+                for(int i = receivedTotal; i < receivedTotal + received + 1; i++) {
+                    buffer[i] = 0;
                 }
-                if(id < 0) {
-                    id = nextId;
+                memcpy(buffer + receivedTotal, temp, received);
+                for(int i = 0; i < bufsize; i++) {
+                    temp[i] = 0;
                 }
-                jId = json_object_new_int(id);
-                json_object_object_add(jObj,"id", jId);
-                buf = json_object_to_json_string(jObj);
-                std::string str(buf);
+                receivedTotal += received;
+                received = read(clientFd, (char*) temp, bufsize);
+            }
 
-                switch(str2int(figure)) {
-                    case str2int("square") : case str2int("circle") : case str2int("text") : case str2int("triangle") :
-                        items[id] = str;
-                        nextId++;
-                        sendToAll(buf, strlen(buf));
-                        break;
-                    case str2int("background") :
-                        background = buf;
-                        sendToAll(buf, strlen(buf));
-                    case str2int("delete") :
-                        items.erase(id);
-                        sendToAll(buf, strlen(buf));
-                        break;
-                    default :
-                        break;
+            char *pch = strtok (buffer,"\n");
+            while(pch != NULL) {
+                try {
+                    printf("Received %s\n", pch);
+                    figure = "";
+                    id = -1;
+                    json_object * jObj = json_tokener_parse(pch);
+                    if(jObj != NULL) {
+                        json_object_object_foreach(jObj, key, val) {
+                            switch (str2int(key)) {
+                                case str2int("figure"):
+                                    figure = json_object_get_string(val);
+                                    break;
+        /*                        case str2int("x"):
+                                    x = json_object_get_double(val);
+                                    break;
+                                case str2int("y"):
+                                    y = json_object_get_double(val);
+                                    break;
+                                case str2int("rotation"):
+                                    rotation = json_object_get_double(val);
+                                    break;
+                                case str2int("scale"):
+                                    scale = json_object_get_double(val);
+                                    break;
+                                case str2int("color") :
+                                    color = json_object_get_string(val);
+                                    break;
+                                case str2int("text"):
+                                    text = json_object_get_string(val);
+                                    break;*/
+                                case str2int("id"):
+                                    id = json_object_get_int(val);
+                                    break;
+                            }
+                        }
+                        if(id < 0) {
+                            id = nextId;
+                        } else if(id > nextId) {
+                            nextId = id;
+                        }
+                        jId = json_object_new_int(id);
+                        json_object_object_add(jObj,"id", jId);
+                        buf = json_object_to_json_string(jObj);
+                        std::string str(buf);
+
+                        switch(str2int(figure)) {
+                            case str2int("square") : case str2int("circle") : case str2int("text") : case str2int("triangle") :
+                                items[id] = str;
+                                nextId++;
+                                sendToAll(buf, strlen(buf));
+                                break;
+                            case str2int("background") :
+                                background = buf;
+                                sendToAll(buf, strlen(buf));
+                                break;
+                            case str2int("delete") :
+                                items.erase(id);
+                                sendToAll(buf, strlen(buf));
+                                break;
+                            default :
+                                break;
+                        }
+                    }
+                } catch(const char* msg) {
+                    printf("Unknown data receive errno %d message %s\n", errno, msg);
                 }
-            } catch(const char* msg) {
-                printf("Unknown data receive errno %d message %s\n", errno, msg);
+                pch = strtok (NULL,"\n");
             }
         }
         else {
-            int wrote1 = write(clientFd, "{}", strlen("{}"));
-            if(wrote1 == -1) {
-                printf("Connection lost to %d\n", clientFd);
-                disconnectClient(clientFd);
-                break;
-            }
-
+            printf("Connection lost to %d\n", clientFd);
+            disconnectClient(clientFd);
+            break;
         }
+        std::fill_n(buffer, receivedTotal, 0);
+        free(buffer);
     }
 }
 
@@ -277,7 +276,7 @@ void disconnectClient(int clientFd) {
 }
 
 void sendCurrentItems(int clientFd) {
-    char buf[BUF_SIZE];
+    char buf[BUFFER_SIZE];
     if(!background.empty()) {
         strcpy(buf, background.c_str());
         strcat(buf, "\n");
@@ -288,9 +287,8 @@ void sendCurrentItems(int clientFd) {
         strcpy(buf, i.second.c_str());
         strcat(buf, "\n");
 
-        printf("sending %s\n", buf);
         int res = write(clientFd, buf, strlen(buf));
-        if(res == -1) {//TODO check if all data were sent
+        if(res == -1) {
             printf("connection broken client %d\n", clientFd);
             disconnectClient(clientFd);
         }

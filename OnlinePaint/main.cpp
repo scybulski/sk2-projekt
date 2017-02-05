@@ -140,26 +140,32 @@ void establishConnection(char* address, char* port) {
 }
 
 void continousUpdate() {
-	ssize_t bufsize1 = BUFFER_SIZE, received1, receivedTotal;
-	char *buffer1, *temp;
 	while(!quit) {
-        receivedTotal = 0;
-        temp = (char*) malloc(bufsize1 * sizeof(char));
-        buffer1 = (char*) malloc(bufsize1 * sizeof(char));
+        char *buffer, *temp;
+        ssize_t bufsize = BUFFER_SIZE, received;
+        temp = (char*) malloc(bufsize * sizeof(char));
+        buffer = (char*) malloc(bufsize * sizeof(char));
         fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) & ~O_NONBLOCK);
-        received1 = read(sock, temp, bufsize1);
-        if(received1 > 0) {
-            buffer1 = strncpy(buffer1, temp, received1);
+        received = read(sock, temp, bufsize);
+        if(received > 0) {
+            ssize_t receivedTotal = 0;
+            buffer = strncpy(buffer, temp, received);
             fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK);
-            while(received1 > 0) {
-                buffer1 = (char*) realloc(buffer1, (receivedTotal + received1 + 1) * sizeof(char));
-                memcpy(buffer1 + receivedTotal, temp, received1);
-                receivedTotal += received1;
-                received1 = read(sock, (char*) temp, bufsize1);
+            while(received > 0) {
+                buffer = (char*) realloc(buffer, (receivedTotal + received + 1) * sizeof(char));
+                for(int i = receivedTotal; i < receivedTotal + received + 1; i++) {
+                    buffer[i] = 0;
+                }
+                memcpy(buffer + receivedTotal, temp, received);
+                for(int i = 0; i < bufsize; i++) {
+                    temp[i] = 0;
+                }
+                receivedTotal += received;
+                received = read(sock, (char*) temp, bufsize);
             }
             try {
-                printf("RECEIVED\n%s\n", buffer1);
-                char *pch = strtok (buffer1,"\n");
+                printf("RECEIVED\n%s\n", buffer);
+                char *pch = strtok (buffer,"\n");
                 while(pch != NULL) {
                     json_object * jobj = json_tokener_parse(pch);
 
@@ -170,7 +176,7 @@ void continousUpdate() {
                 printf("Unknown data receive errno %d message %s\n", errno, msg);
             }
         } else {
-            int wrote1 = write(sock, "{}", strlen("{}"));
+            int wrote1 = write(sock, "{}\n", strlen("{}\n"));
             if(wrote1 == -1) {
                 printf("Connection lost\n");
                 exit(0);
@@ -210,8 +216,9 @@ void sendItem() {
     if(currentItemId > -1)
         json_object_object_add(jObj,"id", jId);
 
-    const char* buf = json_object_to_json_string(jObj);
+    char* buf = (char*) json_object_to_json_string(jObj);
 
+    strcat(buf, "\n");
     int res = write(sock, buf, strlen(buf));
     if(res == -1) {
         printf("Connection lost\n");
@@ -219,7 +226,6 @@ void sendItem() {
     }
     if(currentItem != NULL) {
         goo_canvas_item_remove(currentItem);  //we readd item when we receive it from the server
-
         currentItem = NULL;
     }
 }
@@ -227,7 +233,7 @@ void sendItem() {
 void deleteItem(GooCanvasItem *item) {
     json_object *jObj, *jFigure, *jId;
     std::pair<int, GooCanvasItem*> now;
-    const char* buf;
+    char* buf;
     int res;
 
     for(std::pair<int, GooCanvasItem*> i : items) {
@@ -248,8 +254,9 @@ void deleteItem(GooCanvasItem *item) {
     json_object_object_add(jObj,"figure", jFigure);
     json_object_object_add(jObj,"id", jId);
 
-    buf = json_object_to_json_string(jObj);
+    buf = (char*) json_object_to_json_string(jObj);
 
+    strcat(buf, "\n");
     res = write(sock, buf, strlen(buf));
     if(res == -1) {
         printf("Connection lost\n");
@@ -357,8 +364,9 @@ static void backgroundColorCallback (GtkWidget *wid, GtkWidget *win) {
     json_object_object_add(jObj,"color", jColor);
     json_object_object_add(jObj,"figure", jFigure);
 
-    const char* buf = json_object_to_json_string(jObj);
+    char* buf = (char*) json_object_to_json_string(jObj);
 
+    strcat(buf, "\n");
     int res = write(sock, buf, strlen(buf));
     if(res == -1) {
         printf("Connection lost\n");
@@ -408,7 +416,6 @@ static void drawItem(char* figure, char* text, gdouble scale, gdouble rotation, 
                NULL);
             break;
     }
-//    reorderItems();
 }
 
 static void drawSquareCallback (GtkWidget *wid, GtkWidget *win) {
@@ -595,8 +602,9 @@ int main (int argc, char *argv[])
 
     /* Create the main window */
     mainWin = gtk_window_new (GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_resizable (GTK_WINDOW(mainWin), FALSE);
     gtk_container_set_border_width (GTK_CONTAINER (mainWin), 8);
-    gtk_window_set_title (GTK_WINDOW (mainWin), "Hello World");
+    gtk_window_set_title (GTK_WINDOW (mainWin), "Online Paint");
     gtk_window_set_position (GTK_WINDOW (mainWin), GTK_WIN_POS_CENTER);
     gtk_widget_realize (mainWin);
     g_signal_connect (mainWin, "destroy", gtk_main_quit, NULL);
@@ -612,11 +620,12 @@ int main (int argc, char *argv[])
     buttonText = gtk_button_new_with_label("Tekst");
     textContainter = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     textEdit = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(textEdit), 300);
     gtk_box_pack_start(GTK_BOX(textContainter), textEdit, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(textContainter), buttonText, TRUE, TRUE, 0);
 
     canvas = goo_canvas_new();
-    g_object_set(G_OBJECT(canvas),"background-color","white",NULL);
+    g_object_set(G_OBJECT(canvas), "background-color", "white", NULL);
 
     gtk_widget_set_size_request(canvas, CANVAS_WIDTH, CANVAS_HEIGHT);
     goo_canvas_set_bounds(GOO_CANVAS(canvas), 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -700,100 +709,108 @@ int main (int argc, char *argv[])
 }
 
 void restoreItem(json_object* jo) {
-	const char *figure, *color, *text;
-	gdouble x, y, rotation, scale;
-	int id;
-    json_object_object_foreach(jo, key, val) {
-        switch (str2int(key)) {
-            case str2int("figure"):
-                figure = json_object_get_string(val);
-                break;
-            case str2int("x"):
-                x = json_object_get_double(val);
-                break;
-            case str2int("y"):
-                y = json_object_get_double(val);
-                break;
-            case str2int("rotation"):
-                rotation = json_object_get_double(val);
-                break;
-            case str2int("scale"):
-                scale = json_object_get_double(val);
-                break;
-            case str2int("color"):
-                color = json_object_get_string(val);
-                break;
-            case str2int("text"):
-                text = json_object_get_string(val);
-                break;
-            case str2int("id"):
-                id = json_object_get_int(val);
-                break;
+    if(jo != NULL) {
+        const char *figure, *color, *text;
+        gdouble x, y, rotation, scale;
+        int id;
+        json_object_object_foreach(jo, key, val) {
+            switch (str2int(key)) {
+                case str2int("figure"):
+                    figure = json_object_get_string(val);
+                    break;
+                case str2int("x"):
+                    x = json_object_get_double(val);
+                    break;
+                case str2int("y"):
+                    y = json_object_get_double(val);
+                    break;
+                case str2int("rotation"):
+                    rotation = json_object_get_double(val);
+                    break;
+                case str2int("scale"):
+                    scale = json_object_get_double(val);
+                    break;
+                case str2int("color"):
+                    color = json_object_get_string(val);
+                    break;
+                case str2int("text"):
+                    text = json_object_get_string(val);
+                    break;
+                case str2int("id"):
+                    id = json_object_get_int(val);
+                    break;
+            }
         }
-    }
 
-    GooCanvasItem *newItem = NULL;
-    switch(str2int(figure)) {
-        case str2int("square") :
-            newItem = goo_canvas_rect_new (root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
-                                   "line-width", 0.0,
-                                   "radius-x", 0.0,
-                                   "radius-y", 0.0,
-                                   "stroke-color", "yellow",
-                                   "fill-color", color,
-                                   NULL);
-            goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
-            goo_canvas_item_rotate(newItem, rotation, 0, 0);
-            goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
-            break;
-        case str2int("circle") :
-            newItem = goo_canvas_ellipse_new(root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
-                "line-width", 0.0,
-                "center-x", 0.0,
-                "center-y", 0.0,
-                "fill-color", color,
-                NULL);
-            goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
-            goo_canvas_item_rotate(newItem, rotation, 0, 0);
-            goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
-            break;
-        case str2int("text") :
-            newItem = goo_canvas_text_new (root, text, 0, 0, -1,
-                GOO_CANVAS_ANCHOR_CENTER,
-                "font", "Sans 24",
-                "fill-color", color,
-                NULL);
-            goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
-            goo_canvas_item_rotate(newItem, rotation, 0, 0);
-            goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
-            break;
-        case str2int("triangle") :
-            newItem = goo_canvas_path_new (root,
-                "M -30 -30 L -30 70 L 70 -30 L -30 -30",
-                "fill-color", color,
-                "line-width", 0.0,
-                NULL);
+        GooCanvasItem *newItem = NULL;
+        bool reorder = false;
+        switch(str2int(figure)) {
+            case str2int("square") :
+                newItem = goo_canvas_rect_new (root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
+                                       "line-width", 0.0,
+                                       "radius-x", 0.0,
+                                       "radius-y", 0.0,
+                                       "stroke-color", "yellow",
+                                       "fill-color", color,
+                                       NULL);
                 goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
                 goo_canvas_item_rotate(newItem, rotation, 0, 0);
                 goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
-            break;
-        case str2int("background") :
-            g_object_set(G_OBJECT(canvas), "background-color", color, NULL);
-            break;
-    }
+                reorder = true;
+                break;
+            case str2int("circle") :
+                newItem = goo_canvas_ellipse_new(root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
+                    "line-width", 0.0,
+                    "center-x", 0.0,
+                    "center-y", 0.0,
+                    "fill-color", color,
+                    NULL);
+                goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
+                goo_canvas_item_rotate(newItem, rotation, 0, 0);
+                goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
+                reorder = true;
+                break;
+            case str2int("text") :
+                newItem = goo_canvas_text_new (root, text, 0, 0, -1,
+                    GOO_CANVAS_ANCHOR_CENTER,
+                    "font", "Sans 24",
+                    "fill-color", color,
+                    NULL);
+                goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
+                goo_canvas_item_rotate(newItem, rotation, 0, 0);
+                goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
+                reorder = true;
+                break;
+            case str2int("triangle") :
+                newItem = goo_canvas_path_new (root,
+                    "M -30 -30 L -30 70 L 70 -30 L -30 -30",
+                    "fill-color", color,
+                    "line-width", 0.0,
+                    NULL);
+                goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
+                goo_canvas_item_rotate(newItem, rotation, 0, 0);
+                goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
+                reorder = true;
+                break;
+            case str2int("background") :
+                g_object_set(G_OBJECT(canvas), "background-color", color, NULL);
+                break;
+        }
 
-    if(newItem != NULL) {
-        if(items.find(id) != items.end()) {
-            goo_canvas_item_remove(items[id]);
-            items.find(id)->second = newItem;
+        if(newItem != NULL) {
+            if(items.find(id) != items.end()) {
+                goo_canvas_item_remove(items[id]);
+                items.find(id)->second = newItem;
+            }
+            else {
+                items[id] = newItem;
+            }
+            itemsJsons[id] = jo;
+            g_signal_connect(GOO_CANVAS_ITEM(newItem), "button-press-event", G_CALLBACK(itemClick), NULL);
         }
-        else {
-            items[id] = newItem;
-        }
-        itemsJsons[id] = jo;
-        g_signal_connect(GOO_CANVAS_ITEM(newItem), "button-press-event", G_CALLBACK(itemClick), NULL);
+        if(reorder)
+            reorderItems();
     }
-    reorderItems();
 }
 
 void restoreItemAttributes (GooCanvasItem* item) {
