@@ -7,7 +7,8 @@
 #include <json.h>
 #include <thread>
 #include <fcntl.h>
-#include <unordered_map>
+#include <map>
+#include <unordered_set>
 #include <utility>
 
 #define CANVAS_WIDTH 600
@@ -35,6 +36,7 @@ std::thread c;
 GtkWidget *buttonSquare = NULL;
 GtkWidget *buttonCircle = NULL;
 GtkWidget *buttonText = NULL;
+GtkWidget *buttonTriangle = NULL;
 GtkWidget *textContainter = NULL;
 GtkWidget *textEdit = NULL;
 
@@ -43,6 +45,7 @@ GtkWidget *buttonMove = NULL;
 GtkWidget *buttonRotate = NULL;
 GtkWidget *buttonScale = NULL;
 GtkWidget *buttonColor = NULL;
+GtkWidget *buttonBackground = NULL;
 GtkWidget *mainWin = NULL;
 GtkWidget *box = NULL;
 GtkWidget *canvas = NULL;
@@ -54,8 +57,8 @@ GtkWidget *colorChooser = NULL;
 GdkCursor *cursor = NULL;
 GooCanvasItem *root = NULL, *currentItem = NULL;
 
-std::unordered_map<int, GooCanvasItem*> items;
-std::unordered_map<int, json_object*> itemsJsons;
+std::map<int, GooCanvasItem*> items;
+std::map<int, json_object*> itemsJsons;
 int sock;
 bool quit = false;
 
@@ -74,7 +77,8 @@ constexpr unsigned int str2int(const char* str, int h = 0)
     return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
 }
 
-void restoreSquare(json_object* jo);
+void reorderItems();
+void restoreItem(json_object* jo);
 void deleteItem(GooCanvasItem *item);
 void moveItem(GooCanvasItem *item);
 void scaleItem(GooCanvasItem *item);
@@ -86,27 +90,20 @@ void itemClick(GooCanvasItem  *item,
                 GooCanvasItem  *target_item,
                 GdkEventButton *event,
                 gpointer        user_data)  {
-    int id;
-    const char *figure, *color, *text;
     switch(currentItemState) {
         case ITEM_STATE_EDIT_DELETE :
-            printf("Deleting\n");
             deleteItem(item);
             break;
         case ITEM_STATE_EDIT_MOVE :
-            printf("Moving\n");
             moveItem(item);
             break;
         case ITEM_STATE_EDIT_SCALE :
-            printf("Scaling\n");
             scaleItem(item);
             break;
         case ITEM_STATE_EDIT_ROTATE :
-            printf("Rotating\n");
             rotateItem(item);
             break;
         case ITEM_STATE_EDIT_COLORIZE :
-            printf("Colorizing\n");
             colorizeItem(item);
             currentItemState = ITEM_STATE_NOTHING;
             gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
@@ -166,7 +163,7 @@ void continousUpdate() {
                 while(pch != NULL) {
                     json_object * jobj = json_tokener_parse(pch);
 
-                    restoreSquare(jobj);
+                    restoreItem(jobj);
                     pch = strtok (NULL,"\n");
                 }
             } catch(const char* msg) {
@@ -184,14 +181,23 @@ void continousUpdate() {
 
 void sendItem() {
     /*Creating a json object*/
+    json_object *jColor, *jText;
     json_object * jObj = json_object_new_object();
     json_object *jFigure = json_object_new_string(currentItemFigure);
     json_object *jX = json_object_new_double(currentItemX);
     json_object *jY = json_object_new_double(currentItemY);
     json_object *jRotation = json_object_new_double(currentItemRotation);
     json_object *jScale = json_object_new_double(currentItemScale);
-    json_object *jColor = json_object_new_string(currentItemColor);
-    json_object *jText = json_object_new_string(currentItemText);
+    if(currentItemColor != NULL) {
+        jColor = json_object_new_string(currentItemColor);
+    } else {
+        jColor = json_object_new_string("");
+    }
+    if(currentItemColor != NULL) {
+        jText = json_object_new_string(currentItemText);
+    } else {
+        jText = json_object_new_string(currentItemText);
+    }
     json_object *jId = json_object_new_int(currentItemId);
 
     json_object_object_add(jObj,"figure", jFigure);
@@ -211,9 +217,11 @@ void sendItem() {
         printf("Connection lost\n");
         exit(0);
     }
-    goo_canvas_item_remove(currentItem);  //we readd item when we receive it from the server
+    if(currentItem != NULL) {
+        goo_canvas_item_remove(currentItem);  //we readd item when we receive it from the server
 
-    currentItem = NULL;
+        currentItem = NULL;
+    }
 }
 
 void deleteItem(GooCanvasItem *item) {
@@ -273,11 +281,10 @@ void colorizeItem(GooCanvasItem *item) {
 }
 
 static void deleteItemCallback (GtkWidget *wid, GtkWidget *win) {
-    printf("Delete item\n");
     if(currentItemState != ITEM_STATE_EDIT_DELETE) {
         currentItemState = ITEM_STATE_EDIT_DELETE;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
-        cursor = gdk_cursor_new(GDK_X_CURSOR);
+        cursor = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_X_CURSOR);
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), cursor);
     }
     else {
@@ -290,7 +297,7 @@ static void moveItemCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState != ITEM_STATE_EDIT_MOVE) {
         currentItemState = ITEM_STATE_EDIT_MOVE;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
-        cursor = gdk_cursor_new(GDK_FLEUR);
+        cursor = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_FLEUR);
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), cursor);
     }
     else {
@@ -303,7 +310,7 @@ static void scaleItemCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState != ITEM_STATE_EDIT_SCALE) {
         currentItemState = ITEM_STATE_EDIT_SCALE;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
-        cursor = gdk_cursor_new(GDK_DOUBLE_ARROW);
+        cursor = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_DOUBLE_ARROW);
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), cursor);
     }
     else {
@@ -316,7 +323,7 @@ static void rotateItemCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState != ITEM_STATE_EDIT_ROTATE) {
         currentItemState = ITEM_STATE_EDIT_ROTATE;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
-        cursor = gdk_cursor_new(GDK_EXCHANGE);
+        cursor = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_EXCHANGE);
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), cursor);
     }
     else {
@@ -329,13 +336,35 @@ static void colorizeItemCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState != ITEM_STATE_EDIT_COLORIZE) {
         currentItemState = ITEM_STATE_EDIT_COLORIZE;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
-        cursor = gdk_cursor_new(GDK_SPRAYCAN);
+        cursor = gdk_cursor_new_for_display(gdk_display_get_default(), GDK_SPRAYCAN);
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), cursor);
     }
     else {
         currentItemState = ITEM_STATE_NOTHING;
         gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
     }
+}
+
+static void backgroundColorCallback (GtkWidget *wid, GtkWidget *win) {
+    GdkRGBA color;
+    gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(colorChooser), &color);
+
+    json_object *jObj, *jFigure, *jColor;
+    jObj = json_object_new_object();
+    jFigure = json_object_new_string("background");
+    jColor = json_object_new_string(gdk_rgba_to_string(&color));
+
+    json_object_object_add(jObj,"color", jColor);
+    json_object_object_add(jObj,"figure", jFigure);
+
+    const char* buf = json_object_to_json_string(jObj);
+
+    int res = write(sock, buf, strlen(buf));
+    if(res == -1) {
+        printf("Connection lost\n");
+        exit(0);
+    }
+
 }
 
 static void drawItem(char* figure, char* text, gdouble scale, gdouble rotation, char* color) {
@@ -357,8 +386,6 @@ static void drawItem(char* figure, char* text, gdouble scale, gdouble rotation, 
                 NULL);
             break;
         case str2int("circle") :
-            printf("circle %s \n", currentItemColor);
-
             currentItem = goo_canvas_ellipse_new(root, - DEFAULT_SIZE / 2, - DEFAULT_SIZE / 2, DEFAULT_SIZE, DEFAULT_SIZE,
                 "line-width", 0.0,
                 "center-x", 0.0,
@@ -373,14 +400,22 @@ static void drawItem(char* figure, char* text, gdouble scale, gdouble rotation, 
                 "fill-color", currentItemColor,
                 NULL);
             break;
+        case str2int("triangle") :
+            currentItem = goo_canvas_path_new (root,
+                "M -30 -30 L -30 70 L 70 -30 L -30 -30",
+                "fill-color", currentItemColor,
+                "line-width", 0.0,
+               NULL);
+            break;
     }
+//    reorderItems();
 }
 
 static void drawSquareCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState == ITEM_STATE_NOTHING || currentItemState > ITEM_STATE_EDIT_LOWER) {
         GdkRGBA color;
         gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(colorChooser), &color);
-        drawItem("square", "", 1, 0, gdk_rgba_to_string(&color));
+        drawItem((char*) "square", (char*) "", 1, 0, gdk_rgba_to_string(&color));
         currentItemState = ITEM_STATE_MOVE;
     }
     else if(currentItemState < ITEM_STATE_EDIT_LOWER) {
@@ -395,7 +430,22 @@ static void drawCircleCallback (GtkWidget *wid, GtkWidget *win) {
     if(currentItemState == ITEM_STATE_NOTHING || currentItemState > ITEM_STATE_EDIT_LOWER) {
         GdkRGBA color;
         gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(colorChooser), &color);
-        drawItem("circle", "", 1, 0, gdk_rgba_to_string(&color));
+        drawItem((char*) "circle", (char*) "", 1, 0, gdk_rgba_to_string(&color));
+        currentItemState = ITEM_STATE_MOVE;
+    }
+    else if(currentItemState < ITEM_STATE_EDIT_LOWER) {
+        goo_canvas_item_remove(GOO_CANVAS_ITEM(currentItem));
+        currentItem = NULL;
+        currentItemState = ITEM_STATE_NOTHING;
+        gdk_window_set_cursor(gtk_widget_get_window(mainWin), NULL);
+    }
+}
+
+static void drawTriangleCallback (GtkWidget *wid, GtkWidget *win) {
+    if(currentItemState == ITEM_STATE_NOTHING || currentItemState > ITEM_STATE_EDIT_LOWER) {
+        GdkRGBA color;
+        gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(colorChooser), &color);
+        drawItem((char*) "triangle", (char*) "", 1, 0, gdk_rgba_to_string(&color));
         currentItemState = ITEM_STATE_MOVE;
     }
     else if(currentItemState < ITEM_STATE_EDIT_LOWER) {
@@ -412,7 +462,7 @@ static void drawTextCallback (GtkWidget *wid, GtkWidget *win) {
         if(strlen(text) > 0) {
             GdkRGBA color;
             gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(colorChooser), &color);
-            drawItem("text", text, 1, 0, gdk_rgba_to_string(&color));
+            drawItem((char*) "text", text, 1, 0, gdk_rgba_to_string(&color));
             currentItemState = ITEM_STATE_MOVE;
         }
     }
@@ -505,7 +555,6 @@ gboolean buttonReleaseCallback(
         case ITEM_STATE_EDIT_ROTATE :
             if(currentItem) {
                 goo_canvas_item_get_simple_transform(GOO_CANVAS_ITEM(currentItem), &x, &y, &s, &currentItemRotation);
-                //currentItemScale = ITEM_STATE_EDIT_SCALE;
                 sendItem();
                 currentItemId = -1;
                 currentItem = NULL;
@@ -558,6 +607,7 @@ int main (int argc, char *argv[])
 
     buttonSquare = gtk_button_new_with_label("Kwadrat");
     buttonCircle = gtk_button_new_with_label("Koło");
+    buttonTriangle = gtk_button_new_with_label("Trójkąt");
 
     buttonText = gtk_button_new_with_label("Tekst");
     textContainter = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
@@ -566,6 +616,7 @@ int main (int argc, char *argv[])
     gtk_box_pack_start(GTK_BOX(textContainter), buttonText, TRUE, TRUE, 0);
 
     canvas = goo_canvas_new();
+    g_object_set(G_OBJECT(canvas),"background-color","white",NULL);
 
     gtk_widget_set_size_request(canvas, CANVAS_WIDTH, CANVAS_HEIGHT);
     goo_canvas_set_bounds(GOO_CANVAS(canvas), 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -573,26 +624,31 @@ int main (int argc, char *argv[])
     listScroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_widget_set_size_request(listScroll, 200, -1);
     list = gtk_list_box_new();
-    gtk_list_box_insert(GTK_LIST_BOX(list), buttonSquare, NULL);
-    gtk_list_box_insert(GTK_LIST_BOX(list), buttonCircle, NULL);
-    gtk_list_box_insert(GTK_LIST_BOX(list), textContainter, NULL);
+    gtk_list_box_insert(GTK_LIST_BOX(list), buttonSquare, -1);
+    gtk_list_box_insert(GTK_LIST_BOX(list), buttonCircle, -1);
+    gtk_list_box_insert(GTK_LIST_BOX(list), buttonTriangle, -1);
+    gtk_list_box_insert(GTK_LIST_BOX(list), textContainter, -1);
 
     buttonDelete = gtk_button_new_with_label("Usuń");
     buttonMove = gtk_button_new_with_label("Przesuń");
     buttonRotate = gtk_button_new_with_label("Obróć");
     buttonScale = gtk_button_new_with_label("Skaluj");
     buttonColor = gtk_button_new_with_label("Zmień kolor");
-    buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    buttonBackground = gtk_button_new_with_label("Kolor tła");
+    buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
 
     gtk_box_pack_end(GTK_BOX(buttons), buttonDelete, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), buttonMove, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), buttonRotate, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), buttonScale, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), buttonColor, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(buttons), buttonBackground, TRUE, TRUE, 0);
 
 
     panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     colorChooser = gtk_color_chooser_widget_new();
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(colorChooser), TRUE);
+    g_property_action_new("TRUE", colorChooser, "show-editor");
     gtk_box_pack_end(GTK_BOX(panel), buttons, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(panel), colorChooser, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(panel), listScroll, TRUE, TRUE, 0);
@@ -606,8 +662,11 @@ int main (int argc, char *argv[])
     gtk_widget_set_halign(GTK_WIDGET(buttonScale), GTK_ALIGN_START);
     gtk_widget_set_valign(GTK_WIDGET(buttonColor), GTK_ALIGN_START);
     gtk_widget_set_halign(GTK_WIDGET(buttonColor), GTK_ALIGN_START);
+    gtk_widget_set_valign(GTK_WIDGET(buttonBackground), GTK_ALIGN_START);
+    gtk_widget_set_halign(GTK_WIDGET(buttonBackground), GTK_ALIGN_START);
 
-    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(listScroll), list);
+    gtk_container_add(GTK_CONTAINER(listScroll), list);
+//    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(listScroll), list);
     gtk_container_add ( GTK_CONTAINER (mainWin), box);
     gtk_box_pack_start(GTK_BOX(box), canvas, TRUE, TRUE, 0);
     gtk_box_pack_end ( GTK_BOX (box), panel, TRUE, TRUE, 0);
@@ -618,11 +677,13 @@ int main (int argc, char *argv[])
     g_signal_connect (buttonSquare, "clicked", G_CALLBACK(drawSquareCallback), NULL);
     g_signal_connect (buttonCircle, "clicked", G_CALLBACK(drawCircleCallback), NULL);
     g_signal_connect (buttonText, "clicked", G_CALLBACK(drawTextCallback), NULL);
+    g_signal_connect (buttonTriangle, "clicked", G_CALLBACK(drawTriangleCallback), NULL);
     g_signal_connect (buttonDelete, "clicked", G_CALLBACK(deleteItemCallback), NULL);
     g_signal_connect (buttonMove, "clicked", G_CALLBACK(moveItemCallback), NULL);
     g_signal_connect (buttonScale, "clicked", G_CALLBACK(scaleItemCallback), NULL);
     g_signal_connect (buttonRotate, "clicked", G_CALLBACK(rotateItemCallback), NULL);
     g_signal_connect (buttonColor, "clicked", G_CALLBACK(colorizeItemCallback), NULL);
+    g_signal_connect (buttonBackground, "clicked", G_CALLBACK(backgroundColorCallback), NULL);
     g_signal_connect(GOO_CANVAS(canvas), "motion-notify-event", G_CALLBACK(mouseMovedCallback), NULL);
     g_signal_connect(GOO_CANVAS(canvas), "button_release_event", G_CALLBACK(buttonReleaseCallback), NULL);
 
@@ -638,7 +699,7 @@ int main (int argc, char *argv[])
     return 0;
 }
 
-void restoreSquare(json_object* jo) {
+void restoreItem(json_object* jo) {
 	const char *figure, *color, *text;
 	gdouble x, y, rotation, scale;
 	int id;
@@ -659,7 +720,7 @@ void restoreSquare(json_object* jo) {
             case str2int("scale"):
                 scale = json_object_get_double(val);
                 break;
-            case str2int("color") :
+            case str2int("color"):
                 color = json_object_get_string(val);
                 break;
             case str2int("text"):
@@ -670,7 +731,6 @@ void restoreSquare(json_object* jo) {
                 break;
         }
     }
-    printf("received figure %s id %d\n", figure, id);
 
     GooCanvasItem *newItem = NULL;
     switch(str2int(figure)) {
@@ -707,21 +767,38 @@ void restoreSquare(json_object* jo) {
             goo_canvas_item_rotate(newItem, rotation, 0, 0);
             goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
             break;
+        case str2int("triangle") :
+            newItem = goo_canvas_path_new (root,
+                "M -30 -30 L -30 70 L 70 -30 L -30 -30",
+                "fill-color", color,
+                "line-width", 0.0,
+                NULL);
+                goo_canvas_item_set_simple_transform(newItem, x, y, 1, 0);
+                goo_canvas_item_rotate(newItem, rotation, 0, 0);
+                goo_canvas_item_set_simple_transform(newItem, x, y, scale, rotation);
+            break;
+        case str2int("background") :
+            g_object_set(G_OBJECT(canvas), "background-color", color, NULL);
+            break;
     }
 
     if(newItem != NULL) {
         if(items.find(id) != items.end()) {
             goo_canvas_item_remove(items[id]);
+            items.find(id)->second = newItem;
         }
-        items[id] = newItem;
+        else {
+            items[id] = newItem;
+        }
         itemsJsons[id] = jo;
         g_signal_connect(GOO_CANVAS_ITEM(newItem), "button-press-event", G_CALLBACK(itemClick), NULL);
     }
+    reorderItems();
 }
 
 void restoreItemAttributes (GooCanvasItem* item) {
     std::pair<int, GooCanvasItem*> now;
-    int id;
+    //int id;
     const char *figure, *color, *text;
 	gdouble x, y, rotation, scale;
     for(std::pair<int, GooCanvasItem*> i : items) {
@@ -731,37 +808,29 @@ void restoreItemAttributes (GooCanvasItem* item) {
     json_object_object_foreach(itemsJsons[now.first], key, val) {
         switch (str2int(key)) {
             case str2int("figure"):
-                //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                 figure = json_object_get_string(val);
                 break;
             case str2int("x"):
-                //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                 x = json_object_get_double(val);
                 break;
             case str2int("y"):
-                //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                 y = json_object_get_double(val);
                 break;
             case str2int("rotation"):
-                //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                 rotation = json_object_get_double(val);
                 break;
             case str2int("scale"):
-                //printf("key: %s; value: %s\n", key, json_object_get_double(val));
                 scale = json_object_get_double(val);
                 break;
             case str2int("color") :
-                //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                 color = json_object_get_string(val);
                 break;
             case str2int("text"):
-                //printf("key: %s; value: %s\n", key, json_object_get_string(val));
                 text = json_object_get_string(val);
                 break;
-            case str2int("id"):
-                //printf("key: %s; value: %s\n", key, json_object_get_string(val));
+/*            case str2int("id"):
                 id = json_object_get_int(val);
-                break;
+                break;*/
         }
     }
 
@@ -773,4 +842,14 @@ void restoreItemAttributes (GooCanvasItem* item) {
     currentItemText = (char*) text;
     currentItemFigure = (char*) figure;
 
+}
+
+void reorderItems() {
+    for(std::pair<int, GooCanvasItem*> i : items) {
+        if(i.second != NULL) {
+            goo_canvas_item_raise(i.second, NULL);
+        }
+        else {
+        }
+    }
 }

@@ -18,6 +18,7 @@
 #include <string>
 #include <unordered_set>
 #include <unordered_map>
+#include <map>
 #include <algorithm>
 #include <stk/Stk.h>
 #include <json.h>
@@ -39,7 +40,8 @@ int servFd;
 // client sockets
 std::unordered_set<int> clientFds;
 std::vector<std::thread> r;
-std::unordered_map<int, std::string> items;
+std::map<int, std::string> items;
+std::string background;
 int nextId = 0;
 
 // handles SIGINT
@@ -55,7 +57,6 @@ uint16_t readPort(char * txt);
 void setReuseAddr(int sock);
 
 // thread function
-void sendMessage(int clientFd);
 void receiveMessage(int clientFd);
 
 long getCurrentTimeMilis();
@@ -67,8 +68,6 @@ constexpr unsigned int str2int(const char* str, int h = 0) {
 }
 
 int main(int argc, char ** argv){
-//    printf("libsoxr version %s\n", soxr_version());
-    //printf("%f\n", stk::PI);
     unsigned short port;
 	if(argc != 2) {
         printf("arg1: port\nSetting default port %d\n", DEFAULT_PORT);
@@ -182,7 +181,6 @@ void sendToAllBut(int fd, char * buffer, int count){
 }
 
 void receiveMessage(int clientFd) {
-    printf("receiveMessage: clientFd: %d\n", clientFd);
     char buffer[BUF_SIZE];
     const char *figure, *buf;
     json_object *jId;
@@ -193,8 +191,6 @@ void receiveMessage(int clientFd) {
         }
         int count = read(clientFd, buffer, BUF_SIZE);
         if(count > 0) {
-            printf("buffer %d: %s\n", clientFd, buffer);
-            // broadcast the message
             try {
                 printf("Received %s\n", buffer);
                 figure = "";
@@ -228,7 +224,6 @@ void receiveMessage(int clientFd) {
                             break;
                     }
                 }
-                printf("Figure: %s id: %d\n", figure, id);
                 if(id < 0) {
                     id = nextId;
                 }
@@ -238,17 +233,19 @@ void receiveMessage(int clientFd) {
                 std::string str(buf);
 
                 switch(str2int(figure)) {
-                    case str2int("square") : case str2int("circle") : case str2int("text") :
+                    case str2int("square") : case str2int("circle") : case str2int("text") : case str2int("triangle") :
                         items[id] = str;
                         nextId++;
                         sendToAll(buf, strlen(buf));
                         break;
+                    case str2int("background") :
+                        background = buf;
+                        sendToAll(buf, strlen(buf));
                     case str2int("delete") :
                         items.erase(id);
                         sendToAll(buf, strlen(buf));
                         break;
                     default :
-                        printf("Nothing\n");
                         break;
                 }
             } catch(const char* msg) {
@@ -256,7 +253,6 @@ void receiveMessage(int clientFd) {
             }
         }
         else {
-            printf("read failed count: %d :: error: %d\n", count, errno);
             int wrote1 = write(clientFd, "{}", strlen("{}"));
             if(wrote1 == -1) {
                 printf("Connection lost to %d\n", clientFd);
@@ -280,10 +276,15 @@ void disconnectClient(int clientFd) {
 
 }
 
-
 void sendCurrentItems(int clientFd) {
+    char buf[BUF_SIZE];
+    if(!background.empty()) {
+        strcpy(buf, background.c_str());
+        strcat(buf, "\n");
+        write(clientFd, buf, strlen(buf));
+    }
+
     for(std::pair<int, std::string> i : items) {
-        char buf[BUF_SIZE];
         strcpy(buf, i.second.c_str());
         strcat(buf, "\n");
 
