@@ -20,19 +20,20 @@
 #include <unordered_map>
 #include <map>
 #include <algorithm>
-#include <stk/Stk.h>
+#include <cstring>
 #include <json.h>
 
 #define DEFAULT_PORT 10101
 #define DELAY_MS 1000
 #define BUFFER_SIZE 1024
+#define MAX_EVENTS 4
 
 // server socket
 int servFd;
 
 // client sockets
 std::unordered_set<int> clientFds;
-std::vector<std::thread> r;
+std::vector<std::thread> clientThreads;
 std::map<int, std::string> items;
 std::string background;
 int nextId = 0;
@@ -72,10 +73,9 @@ int main(int argc, char ** argv){
 	servFd = socket(AF_INET, SOCK_STREAM, 0);
 	// get and validate port number
 	int efd = epoll_create(0);
-	epoll_event *events, event;
-	events = nullptr;
+	epoll_event events[MAX_EVENTS], event;
 	event.data.fd = efd;
-	event.events = EPOLLIN | EPOLLET;
+	event.events = EPOLLIN;
 	epoll_ctl(efd, EPOLL_CTL_ADD, servFd, &event);
 
 	if(servFd == -1) error(1, errno, "socket failed");
@@ -100,7 +100,8 @@ int main(int argc, char ** argv){
 
 	while(true){
 		// prepare placeholders for client address
-		epoll_wait(efd, events ,25, -1);
+		epoll_wait(efd, events, MAX_EVENTS, -1);
+		printf("new clients\n");
 		sockaddr_in clientAddr{0};
 		socklen_t clientAddrSize = sizeof(clientAddr);
 
@@ -111,7 +112,7 @@ int main(int argc, char ** argv){
         else {
             clientFds.insert(clientFd);
             //create thread for new client
-            r.push_back(std::thread(receiveMessage, clientFd));
+            clientThreads.push_back(std::thread(receiveMessage, clientFd));
 
             // tell who has connected
             printf("new connection from: %s:%hu (fd: %d)\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port), clientFd);
@@ -136,6 +137,8 @@ void setReuseAddr(int sock){
 void ctrl_c(int){
 	for(int clientFd : clientFds)
 		close(clientFd);
+    for(std::thread &t : clientThreads)
+        t.join();
 	close(servFd);
 	printf("Closing server\n");
 	exit(0);
@@ -183,7 +186,7 @@ void receiveMessage(int clientFd) {
                 received = read(clientFd, (char*) temp, bufsize);
             }
 
-            char *pch = strtok (buffer,"\n");
+            char *pch = strtok (buffer, "\n");
             while(pch != NULL) {
                 try {
                     printf("Received %s\n", pch);
@@ -258,7 +261,7 @@ void receiveMessage(int clientFd) {
             disconnectClient(clientFd);
             break;
         }
-        std::fill_n(buffer, receivedTotal, 0);
+        free(temp);
         free(buffer);
     }
 }
