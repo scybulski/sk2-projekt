@@ -65,7 +65,7 @@
 
 1421079833 /usr/include/json-c/json_c_version.h
 
-1486270805 source:/home/szymon/Pobrane/sk2-projekt/OnlinePaintServer/main.cpp
+1486425107 source:/home/szymon/Pobrane/sk2-projekt/OnlinePaintServer/main.cpp
 	<iostream>
 	<cstdlib>
 	<cstdio>
@@ -80,7 +80,6 @@
 	<poll.h>
 	<signal.h>
 	<fcntl.h>
-	<thread>
 	<vector>
 	<chrono>
 	<string>
@@ -88,6 +87,6 @@
 	<unordered_map>
 	<map>
 	<algorithm>
-	<stk/Stk.h>
+	<cstring>
 	<json.h>
 

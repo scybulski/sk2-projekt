@@ -12,7 +12,6 @@
 #include <poll.h>
 #include <signal.h>
 #include <fcntl.h>
-#include <thread>
 #include <vector>
 #include <chrono>
 #include <string>
@@ -24,7 +23,6 @@
 #include <json.h>
 
 #define DEFAULT_PORT 10101
-#define DELAY_MS 1000
 #define BUFFER_SIZE 1024
 #define MAX_EVENTS 4
 
@@ -33,7 +31,6 @@ int servFd;
 
 // client sockets
 std::unordered_set<int> clientFds;
-std::vector<std::thread> clientThreads;
 std::map<int, std::string> items;
 std::string background;
 int nextId = 0;
@@ -53,6 +50,7 @@ void receiveMessage(int clientFd);
 long getCurrentTimeMilis();
 void disconnectClient(int clientFd);
 void sendCurrentItems(int clientFd);
+int sendToSingle(int clientFd, char* buf, int size);
 
 constexpr unsigned int str2int(const char* str, int h = 0) {
     return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
@@ -72,17 +70,15 @@ int main(int argc, char ** argv){
 	// create socket
 	servFd = socket(AF_INET, SOCK_STREAM, 0);
 	// get and validate port number
-	int efd = epoll_create(0);
-	epoll_event events[MAX_EVENTS], event;
-	event.data.fd = efd;
-	event.events = EPOLLIN;
-	epoll_ctl(efd, EPOLL_CTL_ADD, servFd, &event);
-
-	if(servFd == -1) error(1, errno, "socket failed");
+	int efd = epoll_create(1);
+	if(efd == -1) {
+        perror("epoll_create");
+        exit(EXIT_FAILURE);
+    }
 
 	// graceful ctrl+c exit
 	signal(SIGINT, ctrl_c);
-	// prevent dead sockets from throwing pipŝe errors on write
+	// prevent dead sockets from throwing pipe errors on write
 	signal(SIGPIPE, SIG_IGN);
 
 	setReuseAddr(servFd);
@@ -93,30 +89,49 @@ int main(int argc, char ** argv){
 	if(res) error(1, errno, "bind failed");
 
 	// enter listening mode
-	res = listen(servFd, 1);
+	res = listen(servFd, SOMAXCONN);
 	if(res) error(1, errno, "listen failed");
+
+	epoll_event events[MAX_EVENTS], event;
+	event.data.fd = servFd;
+	event.events = EPOLLIN;
+	epoll_ctl(efd, EPOLL_CTL_ADD, servFd, &event);
+
+	if(servFd == -1) error(1, errno, "socket failed");
 
 /****************************/
 
-	while(true){
+	while(true) {
 		// prepare placeholders for client address
-		epoll_wait(efd, events, MAX_EVENTS, -1);
-		printf("new clients\n");
-		sockaddr_in clientAddr{0};
-		socklen_t clientAddrSize = sizeof(clientAddr);
+		printf("epoll wait %d\n", efd);
+		int nfds = epoll_wait(efd, events, MAX_EVENTS, -1);
+        if (nfds == -1) {
+            perror("epoll_wait");
+            exit(EXIT_FAILURE);
+        }
+        for(int i = 0; i < nfds; i++) {
+            sockaddr_in clientAddr{0};
+            socklen_t clientAddrSize = sizeof(clientAddr);
 
-		// accept new connection
-		auto clientFd = accept(servFd, (sockaddr*) &clientAddr, &clientAddrSize);
-		if(clientFd == -1)
-            error(1, errno, "accept failed");
-        else {
-            clientFds.insert(clientFd);
-            //create thread for new client
-            clientThreads.push_back(std::thread(receiveMessage, clientFd));
-
-            // tell who has connected
-            printf("new connection from: %s:%hu (fd: %d)\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port), clientFd);
-            sendCurrentItems(clientFd);
+            if(events[i].data.fd == servFd) {
+                // accept new connection
+                int clientFd = accept(servFd, (sockaddr*) &clientAddr, &clientAddrSize);
+                if(clientFd == -1)
+                    error(1, errno, "accept failed");
+                else {
+                    event.events = EPOLLIN | EPOLLET;
+                    event.data.fd = clientFd;
+                    if (epoll_ctl(efd, EPOLL_CTL_ADD, clientFd, &event) == -1) {
+                        perror("epoll_ctl: clientFd");
+                        exit(EXIT_FAILURE);
+                    }
+                    clientFds.insert(clientFd);
+                    printf("new connection from: %s:%hu (fd: %d)\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port), clientFd);
+                    sendCurrentItems(clientFd);
+                }
+            } else {
+                receiveMessage(events[i].data.fd);
+            }
         }
 	}
 }
@@ -137,8 +152,6 @@ void setReuseAddr(int sock){
 void ctrl_c(int){
 	for(int clientFd : clientFds)
 		close(clientFd);
-    for(std::thread &t : clientThreads)
-        t.join();
 	close(servFd);
 	printf("Closing server\n");
 	exit(0);
@@ -147,9 +160,10 @@ void ctrl_c(int){
 void sendToAll(const char * buffer, int count){
 	decltype(clientFds) bad;
 	for(int clientFd : clientFds){
-		int res = write(clientFd, buffer, count);
-		if(res != count)
+        if(sendToSingle(clientFd, (char*) buffer, count) == -1) {
 			bad.insert(clientFd);
+        }
+
 	}
 	for(int clientFd : bad){
 		printf("removing %d\n", clientFd);
@@ -162,108 +176,85 @@ void receiveMessage(int clientFd) {
     const char *figure, *buf;
     json_object *jId;
     int id;
-    while(true) {
-        ssize_t received, receivedTotal;
-        char *buffer, *temp;
-        receivedTotal = 0;
-        temp = (char*) malloc(bufsize * sizeof(char));
-        buffer = (char*) malloc(bufsize * sizeof(char));
-        fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) & ~O_NONBLOCK);
-        received = read(clientFd, temp, bufsize);
-        if(received > 0) {
-            buffer = strncpy(buffer, temp, received);
-            fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) | O_NONBLOCK);
-            while(received > 0) {
-                buffer = (char*) realloc(buffer, (receivedTotal + received + 1) * sizeof(char));
-                for(int i = receivedTotal; i < receivedTotal + received + 1; i++) {
-                    buffer[i] = 0;
-                }
-                memcpy(buffer + receivedTotal, temp, received);
-                for(int i = 0; i < bufsize; i++) {
-                    temp[i] = 0;
-                }
-                receivedTotal += received;
-                received = read(clientFd, (char*) temp, bufsize);
+    ssize_t received, receivedTotal;
+    char *buffer, *temp;
+    receivedTotal = 0;
+    temp = (char*) malloc(bufsize * sizeof(char));
+    buffer = (char*) malloc(bufsize * sizeof(char));
+    fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) & ~O_NONBLOCK);
+    received = read(clientFd, temp, bufsize);
+    if(received > 0) {
+        buffer = strncpy(buffer, temp, received);
+        fcntl(clientFd, F_SETFL, fcntl(clientFd, F_GETFL) | O_NONBLOCK);
+        while(received > 0) {
+            buffer = (char*) realloc(buffer, (receivedTotal + received + 1) * sizeof(char));
+            memcpy(buffer + receivedTotal, temp, received);
+            for(int i = 0; i < bufsize; i++) {
+                temp[i] = 0;
             }
+            receivedTotal += received;
+            received = read(clientFd, (char*) temp, bufsize);
+        }
 
-            char *pch = strtok (buffer, "\n");
-            while(pch != NULL) {
-                try {
-                    printf("Received %s\n", pch);
-                    figure = "";
-                    id = -1;
-                    json_object * jObj = json_tokener_parse(pch);
-                    if(jObj != NULL) {
-                        json_object_object_foreach(jObj, key, val) {
-                            switch (str2int(key)) {
-                                case str2int("figure"):
-                                    figure = json_object_get_string(val);
-                                    break;
-        /*                        case str2int("x"):
-                                    x = json_object_get_double(val);
-                                    break;
-                                case str2int("y"):
-                                    y = json_object_get_double(val);
-                                    break;
-                                case str2int("rotation"):
-                                    rotation = json_object_get_double(val);
-                                    break;
-                                case str2int("scale"):
-                                    scale = json_object_get_double(val);
-                                    break;
-                                case str2int("color") :
-                                    color = json_object_get_string(val);
-                                    break;
-                                case str2int("text"):
-                                    text = json_object_get_string(val);
-                                    break;*/
-                                case str2int("id"):
-                                    id = json_object_get_int(val);
-                                    break;
-                            }
-                        }
-                        if(id < 0) {
-                            id = nextId;
-                        } else if(id > nextId) {
-                            nextId = id;
-                        }
-                        jId = json_object_new_int(id);
-                        json_object_object_add(jObj,"id", jId);
-                        buf = json_object_to_json_string(jObj);
-                        std::string str(buf);
-
-                        switch(str2int(figure)) {
-                            case str2int("square") : case str2int("circle") : case str2int("text") : case str2int("triangle") :
-                                items[id] = str;
-                                nextId++;
-                                sendToAll(buf, strlen(buf));
+        char *pch = strtok (buffer, "\n");
+        while(pch != NULL) {
+            try {
+                printf("Received %s\n", pch);
+                figure = "";
+                id = -1;
+                json_object * jObj = json_tokener_parse(pch);
+                if(jObj != NULL) {
+                    json_object_object_foreach(jObj, key, val) {
+                        switch (str2int(key)) {
+                            case str2int("figure"):
+                                figure = json_object_get_string(val);
                                 break;
-                            case str2int("background") :
-                                background = buf;
-                                sendToAll(buf, strlen(buf));
-                                break;
-                            case str2int("delete") :
-                                items.erase(id);
-                                sendToAll(buf, strlen(buf));
-                                break;
-                            default :
+                            case str2int("id"):
+                                id = json_object_get_int(val);
                                 break;
                         }
                     }
-                } catch(const char* msg) {
-                    printf("Unknown data receive errno %d message %s\n", errno, msg);
+                    if(id < 0) {
+                        id = nextId;
+                    } else if(id > nextId) {
+                        nextId = id;
+                    }
+                    jId = json_object_new_int(id);
+                    json_object_object_add(jObj,"id", jId);
+                    buf = json_object_to_json_string(jObj);
+                    std::string str(buf);
+
+                    switch(str2int(figure)) {
+                        case str2int("square") : case str2int("circle") : case str2int("text") : case str2int("triangle") :
+                            items[id] = str;
+                            nextId++;
+                            sendToAll(buf, strlen(buf));
+                            break;
+                        case str2int("background") :
+                            background = buf;
+                            sendToAll(buf, strlen(buf));
+                            break;
+                        case str2int("delete") :
+                            items.erase(id);
+                            sendToAll(buf, strlen(buf));
+                            break;
+                        default :
+                            break;
+                    }
                 }
-                pch = strtok (NULL,"\n");
+            } catch(const char* msg) {
+                printf("Unknown data receive errno %d message %s\n", errno, msg);
             }
+            pch = strtok (NULL,"\n");
         }
-        else {
-            printf("Connection lost to %d\n", clientFd);
-            disconnectClient(clientFd);
-            break;
-        }
-        free(temp);
-        free(buffer);
     }
+    else {
+        printf("Connection lost to %d\n", clientFd);
+        disconnectClient(clientFd);
+        //break;
+    }
+    free(temp);
+    free(buffer);
 }
 
 long getCurrentTimeMilis() {
@@ -279,21 +270,36 @@ void disconnectClient(int clientFd) {
 }
 
 void sendCurrentItems(int clientFd) {
-    char buf[BUFFER_SIZE];
+    char *buf;
     if(!background.empty()) {
+        buf = (char*) malloc(strlen(background.c_str()) + 3);
         strcpy(buf, background.c_str());
         strcat(buf, "\n");
-        write(clientFd, buf, strlen(buf));
+        sendToSingle(clientFd, buf, -1);
     }
 
     for(std::pair<int, std::string> i : items) {
+        buf = (char*) malloc(strlen(i.second.c_str()) + 3);
         strcpy(buf, i.second.c_str());
         strcat(buf, "\n");
 
-        int res = write(clientFd, buf, strlen(buf));
+        sendToSingle(clientFd, buf, -1);
+        free(buf);
+    }
+}
+
+int sendToSingle(int clientFd, char* buf, int size) {
+    if(size < 0)
+        size = strlen(buf);
+    int sent = 0;
+    while(sent < size) {
+        int res = write(clientFd, buf + sent, size);
         if(res == -1) {
-            printf("connection broken client %d\n", clientFd);
             disconnectClient(clientFd);
+            return -1;
+        } else {
+            sent += res;
         }
     }
+    return 0;
 }

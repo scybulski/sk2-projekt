@@ -111,7 +111,7 @@ void itemClick(GooCanvasItem  *item,
 }
 
 void establishConnection(char* address, char* port) {
-    timeout.tv_sec = 3;
+    timeout.tv_sec = 8;
     timeout.tv_usec = 0;
 	// Resolve arguments to IPv4 address with a port number
 	addrinfo *resolved, hints={.ai_flags=0, .ai_family=AF_INET, .ai_socktype=SOCK_STREAM};
