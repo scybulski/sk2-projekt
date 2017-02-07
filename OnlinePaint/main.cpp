@@ -179,9 +179,13 @@ void continousUpdate() {
         } else {
             int wrote1 = write(sock, "{}\n", strlen("{}\n"));
             if(wrote1 == -1) {
-                printf("Connection lost, reestablishing…\n");
-                sleep(10);
-                establishConnection(addr, port);
+                if(!quit) {
+                    printf("Connection lost, reestablishing…\n");
+                    sleep(10);
+                    establishConnection(addr, port);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -680,7 +684,6 @@ int main (int argc, char *argv[])
     gtk_widget_set_halign(GTK_WIDGET(buttonBackground), GTK_ALIGN_START);
 
     gtk_container_add(GTK_CONTAINER(listScroll), list);
-//    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(listScroll), list);
     gtk_container_add ( GTK_CONTAINER (mainWin), box);
     gtk_box_pack_start(GTK_BOX(box), canvas, TRUE, TRUE, 0);
     gtk_box_pack_end ( GTK_BOX (box), panel, TRUE, TRUE, 0);
