@@ -103,7 +103,6 @@ int main(int argc, char ** argv){
 
 	while(true) {
 		// prepare placeholders for client address
-		printf("epoll wait %d\n", efd);
 		int nfds = epoll_wait(efd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
@@ -173,9 +172,7 @@ void sendToAll(const char * buffer, int count){
 
 void receiveMessage(int clientFd) {
 	ssize_t bufsize = BUFFER_SIZE;
-    const char *figure, *buf;
-    json_object *jId;
-    int id;
+    const char *buf;
     ssize_t received, receivedTotal;
     char *buffer, *temp;
     receivedTotal = 0;
@@ -200,10 +197,10 @@ void receiveMessage(int clientFd) {
         while(pch != NULL) {
             try {
                 printf("Received %s\n", pch);
-                figure = "";
-                id = -1;
                 json_object * jObj = json_tokener_parse(pch);
                 if(jObj != NULL) {
+                    int id = -1;
+                    const char *figure = "";
                     json_object_object_foreach(jObj, key, val) {
                         switch (str2int(key)) {
                             case str2int("figure"):
@@ -219,7 +216,7 @@ void receiveMessage(int clientFd) {
                     } else if(id > nextId) {
                         nextId = id;
                     }
-                    jId = json_object_new_int(id);
+                    json_object *jId = json_object_new_int(id);
                     json_object_object_add(jObj,"id", jId);
                     buf = json_object_to_json_string(jObj);
                     std::string str(buf);
@@ -266,7 +263,6 @@ long getCurrentTimeMilis() {
 void disconnectClient(int clientFd) {
     close(clientFd);
     printf("disconnected client\n");
-
 }
 
 void sendCurrentItems(int clientFd) {

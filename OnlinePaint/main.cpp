@@ -61,6 +61,7 @@ std::map<int, GooCanvasItem*> items;
 std::map<int, json_object*> itemsJsons;
 int sock;
 bool quit = false;
+char *addr, *port;
 
 struct timeval timeout;
 
@@ -178,12 +179,14 @@ void continousUpdate() {
         } else {
             int wrote1 = write(sock, "{}\n", strlen("{}\n"));
             if(wrote1 == -1) {
-                printf("Connection lost\n");
-                exit(0);
+                printf("Connection lost, reestablishing…\n");
+                sleep(10);
+                establishConnection(addr, port);
             }
         }
     }
 }
+
 
 void sendItem() {
     /*Creating a json object*/
@@ -593,7 +596,9 @@ int main (int argc, char *argv[])
 	if(argc != 3)
         error(1,0,"Need 2 args");
 
-    establishConnection(argv[1], argv[2]);
+    addr = argv[1];
+    port = argv[2];
+    establishConnection(addr, port);
 
     /* Initialize GTK+ */
     g_log_set_handler ("Gtk", G_LOG_LEVEL_WARNING, (GLogFunc) gtk_false, NULL);
@@ -815,7 +820,6 @@ void restoreItem(json_object* jo) {
 
 void restoreItemAttributes (GooCanvasItem* item) {
     std::pair<int, GooCanvasItem*> now;
-    //int id;
     const char *figure, *color, *text;
 	gdouble x, y, rotation, scale;
     for(std::pair<int, GooCanvasItem*> i : items) {
@@ -845,9 +849,6 @@ void restoreItemAttributes (GooCanvasItem* item) {
             case str2int("text"):
                 text = json_object_get_string(val);
                 break;
-/*            case str2int("id"):
-                id = json_object_get_int(val);
-                break;*/
         }
     }
 
@@ -865,8 +866,6 @@ void reorderItems() {
     for(std::pair<int, GooCanvasItem*> i : items) {
         if(i.second != NULL) {
             goo_canvas_item_raise(i.second, NULL);
-        }
-        else {
         }
     }
 }
