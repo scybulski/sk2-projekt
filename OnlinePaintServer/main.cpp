@@ -24,7 +24,7 @@
 
 #define DEFAULT_PORT 10101
 #define BUFFER_SIZE 1024
-#define MAX_EVENTS 4
+#define MAX_EVENTS 25
 
 // server socket
 int servFd;
